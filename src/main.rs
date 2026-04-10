@@ -13,7 +13,6 @@ fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
             } else {
                 panic!("Unhandled encoded value: {}", encoded_value)
             }
-
         }
         if let Some((len, rest)) = encoded_value.split_once(":"){
             if let Ok(len) = len.parse::<usize>(){
