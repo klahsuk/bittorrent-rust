@@ -9,7 +9,7 @@ fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
         // Example: "5:hello" -> "hello"
         if encoded_value.chars().nth(0) == Some('i'){
             if let Some(end) = encoded_value.find('e'){
-                return serde_json::Value::String(encoded_value[1..end].to_string())
+                return serde_json::Value::Number(encoded_value[1..end].parse().unwrap())
             } else {
                 panic!("Unhandled encoded value: {}", encoded_value)
             }
