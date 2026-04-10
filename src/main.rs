@@ -1,6 +1,6 @@
-use std::{env};
+use std::{collections::HashMap, env};
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 // Available if you need it!
 // use serde_bencode
@@ -11,9 +11,8 @@ fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, &str){
        if let Some (start) = encoded_value.chars().next(){
         match start {
             'i' => parse_int(encoded_value),
-            'l' => {
-                parse_list(encoded_value)
-            },
+            'l' => parse_list(encoded_value),
+            'd' => parse_dict(encoded_value),
             '0'..='9' => parse_string(encoded_value),
             _ => panic!("Unhandled encoded value: {}", encoded_value)
         }
@@ -22,19 +21,19 @@ fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, &str){
     }
 }
 
-fn parse_int(encoded_value: &str) -> (serde_json::Value, &str) {
+fn parse_int(encoded_value: &str) -> (Value, &str) {
      if let Some(end) = encoded_value.find('e'){
-        let val = serde_json::Value::Number(encoded_value[1..end].parse().unwrap());
+        let val = Value::Number(encoded_value[1..end].parse().unwrap());
         return (val , &encoded_value[end + 1 ..])
     } else {
         panic!("Unhandled encoded value: {}", encoded_value)
     }
 }
 
-fn parse_string(encoded_value: &str) -> (serde_json::Value, &str) {
+fn parse_string(encoded_value: &str) -> (Value, &str) {
     if let Some((len, rest)) = encoded_value.split_once(":"){
         if let Ok(len) = len.parse::<usize>(){
-            let val = serde_json::Value::String(rest[..len].to_string());
+            let val = Value::String(rest[..len].to_string());
             return (val , &encoded_value[len + 2 ..])
         }
         else {
@@ -56,6 +55,18 @@ fn parse_list(encoded_value: &str) -> (Value, &str){
         rest = remainder;
     }
     return (Value::Array(lst), &rest.split_at(1).1)
+}
+
+fn parse_dict(encoded_value: &str) -> (Value, &str){
+    let mut dict = Map::new();
+    let mut rest = encoded_value.split_at(1).1;
+    while !rest.is_empty() && !rest.starts_with('e'){
+       let (key, val_slice) = parse_string(rest);
+       let (value, remainder) = decode_bencoded_value(val_slice);
+       rest = remainder;
+       dict.insert(key.to_string(), value);
+    }
+    return (Value::Object(dict), "")
 }
 
 // Usage: your_program.sh decode "<encoded_value>"
