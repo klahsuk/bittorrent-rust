@@ -48,11 +48,9 @@ fn parse_string(encoded_value: &str) -> (serde_json::Value, &str) {
 fn parse_list(encoded_value: &str) -> (Value, &str){
     let mut lst = Vec::new();
     let mut rest = encoded_value.split_at(1).1;
-        println!("received {:?}", rest);
 
     while !rest.is_empty() && !rest.starts_with('e'){
         let (val, remainder) = decode_bencoded_value(rest);
-        println!("remainder {:?}", remainder);
 
         lst.push(val);
         rest = remainder;
