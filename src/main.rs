@@ -1,9 +1,28 @@
+use std::path::PathBuf;
 use std::{env};
-
 use serde_json::{Map, Value};
+use serde::Deserialize;
+use serde::Serialize;
+use serde_bencode;
 
 // Available if you need it!
 // use serde_bencode
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct Torrent {
+    announce: String,
+    info: Info
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct Info {
+    length: usize,
+    name: String,
+    #[serde(rename = "piece length")]
+    piece_length: u64,
+    #[serde(with = "serde_bytes")]
+    pieces: Vec<u8>
+}
 
 #[allow(dead_code)]
 fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, &str){
@@ -73,6 +92,13 @@ fn parse_dict(encoded_value: &str) -> (Value, &str){
     return (Value::Object(dict), &rest.split_at(1).1)
 }
 
+fn load_torrent_file<T>(file_path: T) -> anyhow::Result<Torrent> 
+where T: Into<PathBuf> {
+    let file = std::fs::read(file_path.into())?;
+    let torrent: Torrent = serde_bencode::from_bytes(&file)?;
+    Ok(torrent)
+}
+
 // Usage: your_program.sh decode "<encoded_value>"
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -86,7 +112,13 @@ fn main() {
         let encoded_value = &args[2];
         let decoded_value = decode_bencoded_value(encoded_value);
         println!("{}", decoded_value.0.to_string());
-    } else {
+    }   else if command == "info" {
+        let file_path = &args[2];
+        let torrent = load_torrent_file(file_path).expect("something was wrong with the file path");
+        println!("Tracker URL: {}", torrent.announce);
+        println!("File Length: {}", torrent.info.length)
+    } 
+    else {
         println!("unknown command: {}", args[1])
     }
 }
