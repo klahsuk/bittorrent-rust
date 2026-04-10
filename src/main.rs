@@ -57,7 +57,7 @@ fn parse_list(encoded_value: &str) -> (Value, &str){
         lst.push(val);
         rest = remainder;
     }
-    return (Value::Array(lst), &rest)
+    return (Value::Array(lst), &rest.split_at(1).1)
 }
 
 // Usage: your_program.sh decode "<encoded_value>"
