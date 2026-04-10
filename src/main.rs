@@ -62,10 +62,12 @@ fn parse_dict(encoded_value: &str) -> (Value, &str){
     let mut rest = encoded_value.split_at(1).1;
     while !rest.is_empty() && !rest.starts_with('e'){
        let (key, val_slice) = parse_string(rest);
-       let (value, remainder) = decode_bencoded_value(val_slice);
+       let (v, remainder) = decode_bencoded_value(val_slice);
        rest = remainder;
        if let Value::String(k) = key{
-           dict.insert(k, value);
+           dict.insert(k, v);
+       } else {
+           panic!("keys need to be strings")
        }
     }
     return (Value::Object(dict), &rest.split_at(1).1)
