@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env};
+use std::{env};
 
 use serde_json::{Map, Value};
 
@@ -34,7 +34,7 @@ fn parse_string(encoded_value: &str) -> (Value, &str) {
     if let Some((len, rest)) = encoded_value.split_once(":"){
         if let Ok(len) = len.parse::<usize>(){
             let val = Value::String(rest[..len].to_string());
-            return (val , &encoded_value[len + 2 ..])
+            return (val , &rest[len..])
         }
         else {
             panic!("Unhandled encoded value: {}:{}",len, rest )
@@ -64,9 +64,11 @@ fn parse_dict(encoded_value: &str) -> (Value, &str){
        let (key, val_slice) = parse_string(rest);
        let (value, remainder) = decode_bencoded_value(val_slice);
        rest = remainder;
-       dict.insert(key.to_string(), value);
+       if let Value::String(k) = key{
+           dict.insert(k, value);
+       }
     }
-    return (Value::Object(dict), "")
+    return (Value::Object(dict), &rest.split_at(1).1)
 }
 
 // Usage: your_program.sh decode "<encoded_value>"
