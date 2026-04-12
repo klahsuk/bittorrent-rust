@@ -1,19 +1,22 @@
+use core::hash;
 use std::path::PathBuf;
-use std::{env};
 use serde_json::{Map, Value};
 use serde_bencode;
 use hashes::Hashes;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use clap::{Parser, Subcommand};
 use anyhow::Context;
+use sha1::Digest;
 
 // Available if you need it!
 // use serde_bencode
 
 
 mod hashes {
-    use serde::de::{self, Visitor};
-    use std::fmt;
+    use serde::Serializer;
+    use serde::ser::SerializeSeq;
+    use serde::{Serialize, de::{self, Visitor}};
+    use std::{fmt};
     use serde::Deserialize;
     struct HashesVisitor;
     
@@ -53,21 +56,28 @@ mod hashes {
         }
     }
 
+   impl Serialize for Hashes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let single_slice = self.0.concat();
+        serializer.serialize_bytes(&single_slice)
+    }
+}
+
 }
 
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct Torrent {
     announce: String,
     info: Info
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct Info {
     
-    //size of the file in bytes, for single-file torrents
-    length: usize,
-
     //suggested name to save the file / directory as
     name: String,
     #[serde(rename = "piece length")]
@@ -82,11 +92,12 @@ struct Info {
     keys: Keys
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 enum Keys{
     SingleFile{
-        length: usize
+    //size of the file in bytes, for single-file torrents
+        length: usize,
     },
 
     MultiFile{
@@ -98,7 +109,7 @@ enum Keys{
 #[derive(Parser, Debug)]
 struct Args {
     #[command(subcommand)]
-        command: Command
+    command: Command
 }
 
 #[derive(Subcommand, Debug)]
@@ -112,7 +123,7 @@ enum Command{
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct File {
     length: usize,
     path: Vec<String>
@@ -204,14 +215,18 @@ fn main() -> anyhow::Result<()>{
         }
         Command::Info { torrent } => {
             let dot_torrent = std::fs::read(torrent).context("read torrent file")?;
-            println!("{:?}", dot_torrent);
             let t: Torrent =
                 serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
+            let info_dict_encoded = serde_bencode::to_bytes(&t.info).context("re-encoding the info dict")?;
+            let mut hasher = sha1::Sha1::new();
+            hasher.update(&info_dict_encoded);
+            let info_hash = hasher.finalize();
             eprintln!("{t:?}");
             println!("Tracker URL: {}", t.announce);
             if let Keys::SingleFile { length } = t.info.keys {
                 println!("Length: {length}");
-            } else {
+                println!("Info Hash: {}", hex::encode(info_hash));
+                        } else {
                 todo!();
             }
         }
