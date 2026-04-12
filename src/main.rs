@@ -1,27 +1,121 @@
 use std::path::PathBuf;
 use std::{env};
 use serde_json::{Map, Value};
-use serde::Deserialize;
-use serde::Serialize;
 use serde_bencode;
+use hashes::Hashes;
+use serde::Deserialize;
+use clap::{Parser, Subcommand};
+use anyhow::Context;
 
 // Available if you need it!
 // use serde_bencode
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+
+mod hashes {
+    use serde::de::{self, Visitor};
+    use std::fmt;
+    use serde::Deserialize;
+    struct HashesVisitor;
+    
+    #[derive(Debug, Clone)]
+    pub struct Hashes(Vec<[u8; 20]>);
+    
+    
+    impl<'de> Visitor<'de> for HashesVisitor {
+        type Value = Hashes;
+    
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a byte string with lebgth a multiple of 20")
+        }
+    
+        fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if v.len() % 20 != 0{
+                return 
+                Err(E::custom(format!("vector len must be a multiple of 20: {} does not fit the criteria", v.len())));
+            }
+    
+            Ok(Hashes(
+                v.chunks_exact(20)
+                .map(|slice_20| slice_20.try_into().unwrap())
+                .collect()
+            ))
+        }
+    }
+    
+    impl <'de> Deserialize<'de> for Hashes {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: de::Deserializer<'de> {
+            deserializer.deserialize_bytes(HashesVisitor)
+        }
+    }
+
+}
+
+
+#[derive(Debug, Clone, Deserialize)]
 struct Torrent {
     announce: String,
     info: Info
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct Info {
+    
+    //size of the file in bytes, for single-file torrents
     length: usize,
+
+    //suggested name to save the file / directory as
     name: String,
     #[serde(rename = "piece length")]
+
+    //number of bytes in each piece, an integer
     piece_length: u64,
-    #[serde(with = "serde_bytes")]
-    pieces: Vec<u8>
+
+    //concatenated SHA-1 hashes of each piece (20 bytes each), a string
+    pieces: Hashes,
+
+    #[serde(flatten)]
+    keys: Keys
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum Keys{
+    SingleFile{
+        length: usize
+    },
+
+    MultiFile{
+        files: Vec<File>
+    }
+
+}
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[command(subcommand)]
+        command: Command
+}
+
+#[derive(Subcommand, Debug)]
+enum Command{
+    Decode {
+        value: String
+    },
+
+    Info {
+        torrent: PathBuf
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct File {
+    length: usize,
+    path: Vec<String>
 }
 
 #[allow(dead_code)]
@@ -100,25 +194,28 @@ where T: Into<PathBuf> {
 }
 
 // Usage: your_program.sh decode "<encoded_value>"
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let command = &args[1];
+fn main() -> anyhow::Result<()>{
+    let args = Args::parse();
 
-    if command == "decode" {
-        // You can use print statements as follows for debugging, they'll be visible when running tests.
-        eprintln!("Logs from your program will appear here!");
-
-        // TODO: Uncomment the code below to pass the first stage
-        let encoded_value = &args[2];
-        let decoded_value = decode_bencoded_value(encoded_value);
-        println!("{}", decoded_value.0.to_string());
-    }   else if command == "info" {
-        let file_path = &args[2];
-        let torrent = load_torrent_file(file_path).expect("something was wrong with the file path");
-        println!("Tracker URL: {}", torrent.announce);
-        println!("File Length: {}", torrent.info.length)
-    } 
-    else {
-        println!("unknown command: {}", args[1])
+    match args.command {
+        Command::Decode { value } => {
+            let v = decode_bencoded_value(&value).0;
+            println!("{v}");
+        }
+        Command::Info { torrent } => {
+            let dot_torrent = std::fs::read(torrent).context("read torrent file")?;
+            println!("{:?}", dot_torrent);
+            let t: Torrent =
+                serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
+            eprintln!("{t:?}");
+            println!("Tracker URL: {}", t.announce);
+            if let Keys::SingleFile { length } = t.info.keys {
+                println!("Length: {length}");
+            } else {
+                todo!();
+            }
+        }
     }
+
+    Ok(())
 }
