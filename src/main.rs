@@ -157,7 +157,7 @@ async fn main() -> anyhow::Result<()>{
             );
 
             let response = reqwest::get(tracker_url).await.context("fetch tracker")?;
-            let response = response.bytes().await.context("parse tracker response")?;
+            let response = response.bytes().await.context("fetch tracker response")?;
             eprintln!("{response:?}");
             let response: TrackerResponse = 
                 serde_bencode::from_bytes(&response).context("extracting Tracker Response")?;
