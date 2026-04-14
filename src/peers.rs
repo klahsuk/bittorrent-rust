@@ -3,7 +3,7 @@ use std::net::SocketAddrV4;
 use serde::{Deserialize, Serialize, Serializer};
 use serde::de::{self, Visitor};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Peers(pub Vec<SocketAddrV4>);
 struct PeersVisitor;
 
@@ -35,6 +35,15 @@ E: de::Error, {
         ))
         }
     }
+}
+
+impl <'de> Deserialize<'de> for Peers {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: de::Deserializer<'de> {
+        deserializer.deserialize_bytes(PeersVisitor)
+    }
+
 }
 
 impl Serialize for Peers {
