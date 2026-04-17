@@ -66,7 +66,7 @@ fn parse_string(encoded_value: &str) -> (Value, &str) {
         }
     } else {
         panic!("Unhandled encoded value: {}", encoded_value)
-    }   
+    }
 }
 
 fn parse_list(encoded_value: &str) -> (Value, &str){
@@ -98,7 +98,7 @@ fn parse_dict(encoded_value: &str) -> (Value, &str){
     return (Value::Object(dict), &rest.split_at(1).1)
 }
 
-fn load_torrent_file<T>(file_path: T) -> anyhow::Result<Torrent> 
+fn load_torrent_file<T>(file_path: T) -> anyhow::Result<Torrent>
 where T: Into<PathBuf> {
     let file = std::fs::read(file_path.into()).context("read torrent file")?;
     let torrent: Torrent = serde_bencode::from_bytes(&file).context("parse torrent file")?;
@@ -147,7 +147,7 @@ async fn main() -> anyhow::Result<()>{
                 compact: 1,
             };
 
-            let url_params = 
+            let url_params =
             serde_urlencoded::to_string(&request).context("url-encoding tracker params")?;
             let tracker_url = format!(
                 "{}?{}&info_hash={}",
@@ -159,15 +159,15 @@ async fn main() -> anyhow::Result<()>{
             let response = reqwest::get(tracker_url).await.context("fetch tracker")?;
             let response = response.bytes().await.context("fetch tracker response")?;
             eprintln!("{response:?}");
-            let response: TrackerResponse = 
+            let response: TrackerResponse =
                 serde_bencode::from_bytes(&response).context("extracting Tracker Response")?;
-            
+
             for peer in &response.peers.0 {
                 println!("{}:{}", peer.ip(), peer.port());
             }
-               
+
             Ok(())
-        } 
+        }
     }
 
 }

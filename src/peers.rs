@@ -17,10 +17,9 @@ impl<'de> Visitor<'de> for PeersVisitor {
 fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
 where
 E: de::Error, {
-        
-    if v.len() % 6 != 0 {
-        return 
-        Err(E::custom(format!("vector len must be a multiple of 6: {} does not fit the criteria", v.len())));
+
+    if !v.len().is_multiple_of(6) {
+        Err(E::custom(format!("vector len must be a multiple of 6: {} does not fit the criteria", v.len())))
     } else {
         Ok (
             Peers (v.chunks_exact(6)
@@ -50,7 +49,7 @@ impl Serialize for Peers {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer {
-        let mut single_slice = Vec::with_capacity(6 * self.0.len()); 
+        let mut single_slice = Vec::with_capacity(6 * self.0.len());
         for peer in &self.0 {
             single_slice.extend(peer.ip().octets());
             single_slice.extend(peer.port().to_be_bytes());
@@ -63,7 +62,7 @@ pub fn url_encode(t: &[u8; 20]) -> String{
         let mut encoded = String::with_capacity(3 * t.len());
         for &byte in t {
             encoded.push('%');
-            encoded.push_str(&hex::encode(&[byte]));
+            encoded.push_str(&hex::encode([byte]));
         }
         encoded
     }

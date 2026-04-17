@@ -1,8 +1,9 @@
 use serde::Serializer;
 use serde::{Serialize, Deserialize, de::{self, Visitor}};
 use std::{fmt};
+
 struct HashesVisitor;
-    
+
 #[derive(Debug, Clone)]
 pub struct Hashes(pub Vec<[u8; 20]>);
 
@@ -18,7 +19,7 @@ impl<'de> Visitor<'de> for HashesVisitor {
     where
         E: de::Error,
     {
-        if v.len() % 20 != 0{
+        if !v.len().is_multiple_of(20) {
             return 
             Err(E::custom(format!("vector len must be a multiple of 20: {} does not fit the criteria", v.len())));
         }

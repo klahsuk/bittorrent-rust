@@ -12,17 +12,17 @@ pub struct Torrent {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Info {
-    
+
     //suggested name to save the file / directory as
     pub name: String,
     #[serde(rename = "piece length")]
-    
+
     //number of bytes in each piece, an integer
     pub piece_length: u64,
-    
+
     //concatenated SHA-1 hashes of each piece (20 bytes each), a string
     pub pieces: Hashes,
-    
+
     #[serde(flatten)]
     pub keys: Keys
 }
@@ -34,15 +34,15 @@ pub enum Keys{
         //size of the file in bytes, for single-file torrents
         length: usize,
     },
-    
+
     MultiFile{
         files: Vec<File>
     }
-     
+
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-struct File {
+pub struct File {
     length: usize,
     path: Vec<String>
 }
