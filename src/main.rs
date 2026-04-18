@@ -1,11 +1,15 @@
+use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use anyhow::{Context};
+use codecrafters_bittorrent::handshake::Handshake;
 use codecrafters_bittorrent::peers::url_encode;
 use serde_json::{Map, Value};
 use serde_bencode;
 use clap::{Parser, Subcommand};
 use codecrafters_bittorrent::torrent::*;
 use codecrafters_bittorrent::tracker::*;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -25,6 +29,11 @@ enum Command{
 
     Peers {
         torrent: PathBuf
+    },
+
+    Handshake {
+        torrent: PathBuf,
+        peer: String
     }
 }
 
@@ -167,7 +176,33 @@ async fn main() -> anyhow::Result<()>{
             }
 
             Ok(())
+        },
+
+        Command::Handshake { torrent, peer } => {
+            let t = load_torrent_file(torrent).unwrap();
+            let info_hash = t.info_hash();
+            let peer = peer.parse::<SocketAddrV4>().context("parsing the peer")?;
+            let mut peer = tokio::net::TcpStream::connect(peer)
+                .await
+                .context("connect to peer")?;
+            let mut handshake = Handshake::new(info_hash, b"99887766554433221100".clone());
+            let handshake_bytes =
+                 &mut handshake as *mut Handshake as *mut [u8; std::mem::size_of::<Handshake>()];
+
+            let handshake_bytes: &mut [u8; std::mem::size_of::<Handshake>()] =
+                    unsafe { &mut *handshake_bytes };
+
+            let _ = peer.write_all(handshake_bytes)
+            .await
+            .context("sending handshake");
+
+            peer.read_exact(handshake_bytes)
+            .await
+            .context("reading response handshake")?;
+
+            println!("Peer ID: {}", hex::encode(handshake.peer_id));
+            
+            Ok(())
         }
     }
-
 }
