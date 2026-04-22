@@ -1,7 +1,7 @@
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use anyhow::{Context};
-use codecrafters_bittorrent::handshake::Handshake;
+use codecrafters_bittorrent::peer::{Handshake, MessageFramer, MessageTag, PeerMessage};
 use codecrafters_bittorrent::peers::url_encode;
 use serde_json::{Map, Value};
 use serde_bencode;
@@ -10,6 +10,7 @@ use codecrafters_bittorrent::torrent::*;
 use codecrafters_bittorrent::tracker::*;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+use futures_util::{SinkExt, StreamExt};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -18,6 +19,7 @@ struct Args {
 }
 
 #[derive(Subcommand, Debug)]
+#[clap(rename_all = "snake_case")]
 enum Command{
     Decode {
         value: String
@@ -34,6 +36,13 @@ enum Command{
     Handshake {
         torrent: PathBuf,
         peer: String
+    },
+
+    DownloadPiece {
+        #[arg(short)]
+        output: PathBuf,
+        torrent: PathBuf,
+        piece_id: usize
     }
 }
 
@@ -201,7 +210,74 @@ async fn main() -> anyhow::Result<()>{
             .context("reading response handshake")?;
 
             println!("Peer ID: {}", hex::encode(handshake.peer_id));
+        
+            Ok(())
+        },
+
+        Command::DownloadPiece { output, torrent, piece_id } => {
+
+            let t = load_torrent_file(torrent).unwrap();
+            let peer_id = String::from("99887766554433221100");
+            let length = if let Keys::SingleFile { length } = t.info.keys { length }
+                else {todo!()};
+            let info_hash = t.info_hash();
+            let request = TrackerRequest {
+                peer_id: peer_id,
+                port: 6861,
+                uploaded: 0,
+                downloaded:0,
+                left: length,
+                compact: 1,
+            };
+
+            let url_params =
+            serde_urlencoded::to_string(&request).context("url-encoding tracker params")?;
+            let tracker_url = format!(
+                "{}?{}&info_hash={}",
+                t.announce,
+                url_params,
+                &url_encode(&info_hash)
+            );
+
+            let response = reqwest::get(tracker_url).await.context("fetch tracker")?;
+            let response = response.bytes().await.context("fetch tracker response")?;
+            eprintln!("{response:?}");
+            let tracker_info: TrackerResponse =
+                serde_bencode::from_bytes(&response).context("extracting Tracker Response")?;
+
+            let peer = tracker_info.peers.0[0];
+            let mut peer = tokio::net::TcpStream::connect(peer)
+                .await
+                .context("connect to peer")?;
+
+            let mut handshake = Handshake::new(info_hash, b"99887766554433221100".clone());
+            let handshake_bytes =
+                 &mut handshake as *mut Handshake as *mut [u8; std::mem::size_of::<Handshake>()];
+
+            let handshake_bytes: &mut [u8; std::mem::size_of::<Handshake>()] =
+                    unsafe { &mut *handshake_bytes };
+
+            let _ = peer.write_all(handshake_bytes)
+            .await
+            .context("sending handshake");
+
+            peer.read_exact(handshake_bytes)
+            .await
+            .context("reading response handshake")?;
+
+            let mut peer = tokio_util::codec::Framed::new(peer, MessageFramer);
             
+            let bitfield = peer
+                .next()
+                .await
+                .expect("peer always sends bitfield")
+                .context("peer message was invalid")?;
+
+            peer.send(PeerMessage {
+                tag: MessageTag::Interested,
+                payload: Vec::new()
+            }).await.context("sending interested message");
+    
             Ok(())
         }
     }
