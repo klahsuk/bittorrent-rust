@@ -1,8 +1,8 @@
 use crate::peer::MessageTag::*;
 use bytes::BufMut;
-use tokio_util::codec::Encoder;
+use bytes::{Buf, BytesMut};
 use tokio_util::codec::Decoder;
-use bytes::{BytesMut, Buf};
+use tokio_util::codec::Encoder;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -16,18 +16,18 @@ pub struct Handshake {
 
 impl Handshake {
     pub fn new(info_hash: [u8; 20], peer_id: [u8; 20]) -> Self {
-        Handshake { 
+        Handshake {
             length: 19,
             protocol: b"BitTorrent protocol".clone(),
             reserved_bytes: [0; 8],
             info_hash,
-            peer_id 
+            peer_id,
         }
     }
 }
 
 #[repr(u8)]
-pub enum MessageTag {  
+pub enum MessageTag {
     Choke = 0,
     Unchoke = 1,
     Interested = 2,
@@ -41,7 +41,7 @@ pub enum MessageTag {
 
 pub struct PeerMessage {
     pub tag: MessageTag,
-    pub payload: Vec<u8>
+    pub payload: Vec<u8>,
 }
 
 pub struct MessageFramer;
@@ -57,7 +57,7 @@ impl Encoder<PeerMessage> for MessageFramer {
         if item.payload.len() + 1 > MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Frame of length {} is too large.", item.payload.len())
+                format!("Frame of length {} is too large.", item.payload.len()),
             ));
         }
 
@@ -80,25 +80,23 @@ impl Decoder for MessageFramer {
     type Item = PeerMessage;
     type Error = std::io::Error;
 
-    fn decode(
-        &mut self,
-        src: &mut BytesMut
-    ) -> Result<Option<Self::Item>, Self::Error> {
-        
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // Read length marker.
         let mut length_bytes = [0u8; 4];
         length_bytes.copy_from_slice(&src[..4]);
-        let length = u32::from_le_bytes(length_bytes) as usize;
-        
+        let length = u32::from_be_bytes(length_bytes) as usize;
+        println!("{MAX}");
+        println!("{length}");
+
         if length == 0 {
             //heartbeat to keep alive just discard
             src.advance(4);
             //trying again
             return self.decode(src);
         }
-        
+
         if src.len() < 5 {
-            // 4 bytes for the message id and tag 
+            // 4 bytes for the message id and tag
             // Not enough data to read length marker.
             return Ok(None);
         }
@@ -107,7 +105,7 @@ impl Decoder for MessageFramer {
         if length > MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Frame of length decoded {} is too large.", length)
+                format!("Frame of length decoded {} is too large.", length),
             ));
         }
 
@@ -127,19 +125,21 @@ impl Decoder for MessageFramer {
         // this frame.
 
         let tag = match src[4] {
-           0 => Choke,
-           1 => Unchoke,
-           2 => Interested,
-           3 => NotInterested,
-           4 => Have,
-           5 => BitField,
-           6 => Request,
-           7 => Piece,
-           8 => Cancel,
-           _tag => return Err(std::io::Error::new(
+            0 => Choke,
+            1 => Unchoke,
+            2 => Interested,
+            3 => NotInterested,
+            4 => Have,
+            5 => BitField,
+            6 => Request,
+            7 => Piece,
+            8 => Cancel,
+            _tag => {
+                return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                format!("unexpected message type {}.", _tag)
+                    format!("unexpected message type {}.", _tag),
                 ))
+            }
         };
 
         let data = src[5..4 + length - 1].to_vec();
@@ -147,17 +147,14 @@ impl Decoder for MessageFramer {
 
         // Convert the data to a string, or fail if it is not valid utf-8.
         match String::from_utf8(data.clone()) {
-            Ok(string) => Ok(
-                Some(PeerMessage {
-                    tag: MessageTag::BitField, payload: data
-                })
-            ),
-            Err(utf8_error) => {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    utf8_error.utf8_error(),
-                ))
-            },
+            Ok(string) => Ok(Some(PeerMessage {
+                tag: MessageTag::BitField,
+                payload: data,
+            })),
+            Err(utf8_error) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                utf8_error.utf8_error(),
+            )),
         }
     }
 }
