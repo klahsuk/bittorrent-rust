@@ -1,16 +1,19 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use codecrafters_bittorrent::peer::{Handshake, MessageFramer, MessageTag, PeerMessage};
+use codecrafters_bittorrent::peer::{Handshake, MessageFramer, MessageTag, PeerMessage, Piece, Request};
 use codecrafters_bittorrent::peers::url_encode;
 use codecrafters_bittorrent::torrent::*;
 use codecrafters_bittorrent::tracker::*;
 use futures_util::{SinkExt, StreamExt};
 use serde_bencode;
 use serde_json::{Map, Value};
+use sha1::Digest;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+
+const BLOCK_MAX_SIZE: u64 = 1 << 14;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -200,12 +203,9 @@ async fn main() -> anyhow::Result<()> {
             let mut peer = tokio::net::TcpStream::connect(peer)
                 .await
                 .context("connect to peer")?;
-            let mut handshake = Handshake::new(info_hash, b"99887766554433221100".clone());
-            let handshake_bytes =
-                &mut handshake as *mut Handshake as *mut [u8; std::mem::size_of::<Handshake>()];
 
-            let handshake_bytes: &mut [u8; std::mem::size_of::<Handshake>()] =
-                unsafe { &mut *handshake_bytes };
+            let mut handshake = Handshake::new(info_hash, b"99887766554433221100".clone());
+            let handshake_bytes = Handshake::as_bytes_mut(&mut handshake);
 
             let _ = peer
                 .write_all(handshake_bytes)
@@ -233,6 +233,8 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 todo!()
             };
+
+            assert!(piece_id < t.info.pieces.0.len());
             let info_hash = t.info_hash();
             let request = TrackerRequest {
                 peer_id: peer_id,
@@ -264,6 +266,8 @@ async fn main() -> anyhow::Result<()> {
                 .context("connect to peer")?;
 
             let mut handshake = Handshake::new(info_hash, b"99887766554433221100".clone());
+            println!("Peer ID: {}", hex::encode(handshake.peer_id));
+
             let handshake_bytes =
                 &mut handshake as *mut Handshake as *mut [u8; std::mem::size_of::<Handshake>()];
 
@@ -290,6 +294,8 @@ async fn main() -> anyhow::Result<()> {
                 .expect("peer always sends bitfield")
                 .context("peer message was invalid")?;
 
+            assert_eq!(bitfield.tag, MessageTag::BitField);
+
             peer.send(PeerMessage {
                 tag: MessageTag::Interested,
                 payload: Vec::new(),
@@ -297,6 +303,83 @@ async fn main() -> anyhow::Result<()> {
             .await
             .context("sending interested message");
 
+            let unchoke = peer
+                .next()
+                .await
+                .expect("should be an unchoke")
+                .context("waiting for unchoke")?;
+
+            assert_eq!(unchoke.tag, MessageTag::Unchoke);
+            assert!(unchoke.payload.is_empty());
+
+            let piece_hash = t.info.pieces.0[piece_id];
+
+            //use piece_length (16kb) to split the piece into
+            // chunks send request for each except last one which needs to be calculated
+            //then compare hash
+            let piece_size = if piece_id == t.info.pieces.0.len() + 1 {
+            let md = length % t.info.piece_length as usize;
+                if md == 0 {
+                    t.info.piece_length
+                } else {
+                    md as u64
+                }
+            } else {
+                t.info.piece_length
+            };
+
+            //BLOCK_MAX_SIZE + 1 rounds up
+            let num_blocks = (piece_size + (BLOCK_MAX_SIZE - 1)) / BLOCK_MAX_SIZE;
+            let mut all_blocks = Vec::with_capacity(piece_size as usize);
+            
+            for b in 0..num_blocks {
+                let block_size = if b == num_blocks -1 {
+                    piece_size & BLOCK_MAX_SIZE
+                } else {
+                    BLOCK_MAX_SIZE
+                };
+                let mut request = Request::new(
+                    piece_id as u32,
+                    b as u32,
+                    block_size as u32
+                );
+
+                let request_bytes = Vec::from(request.as_bytes_mut());
+
+                peer.send(
+                    PeerMessage { tag: MessageTag::Request, payload: request_bytes }
+                ).await
+                .with_context(|| format!("sending request for block {}", b))?;
+
+             let block = peer
+                .next()
+                .await
+                .expect("should be the block")
+                .context("getting blocks of the piece")? ;
+
+            assert_eq!(block.tag, MessageTag::Piece);
+            assert!(!block.payload.is_empty());
+
+                //response needs to be added into all blocks
+
+            let piece = (&block.payload[..]) as *const [u8] as *const Piece;
+            let piece = unsafe {
+                &*piece
+            };
+            
+             all_blocks.extend(piece.block());
+            }
+
+            let mut hasher = sha1::Sha1::new();
+            hasher.update(&all_blocks);
+            let hash: [u8; 20] = hasher
+            .finalize()
+            .try_into()
+            .expect("Generic Array<_, 20> == [_; 20]");
+
+            assert_eq!(all_blocks.len() as u64, piece_size);
+            assert_eq!(hash, piece_hash);
+            
             Ok(())
         }
     }
